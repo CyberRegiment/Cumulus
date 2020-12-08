@@ -457,6 +457,8 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Timeout: PT15M
+  Storage:
+    Type: AWS::S3::Bucket
 Outputs:
   WebsiteURL:
     Value: !Join
