@@ -370,6 +370,12 @@ Resources:
                   - !Ref DBPassword
                   - |
                     '/g" wp-config.php
+                  - sed -i "s/'localhost'/'
+                  - 'Fn::GetAtt':
+                      - Storage
+                      - WebsiteURL
+                  - |
+                    '/g" wp-config.php
               mode: '000500'
               owner: root
               group: root
