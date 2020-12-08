@@ -258,6 +258,7 @@ Resources:
           CidrIp: !Ref SSHLocation
   WebServer:
     Type: 'AWS::EC2::Instance'
+    DependsOn: Storage
     Metadata:
       'AWS::CloudFormation::Init':
         configSets:
