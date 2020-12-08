@@ -335,7 +335,10 @@ Resources:
                     ;
                   - CREATE USER '
                   - !Ref DBUser
-                  - '''@''localhost'' IDENTIFIED BY '''
+                  - |
+                    '@'
+                  - !GetAtt Storage.WebsiteURL
+                  - ''' IDENTIFIED BY '''
                   - !Ref DBPassword
                   - |
                     ';
@@ -344,7 +347,10 @@ Resources:
                   - .* TO '
                   - !Ref DBUser
                   - |
-                    '@'localhost';
+                    '@'
+                  - !GetAtt Storage.WebsiteURL
+                  - |
+                    ';
                   - |
                     FLUSH PRIVILEGES;
               mode: '000400'
