@@ -622,7 +622,7 @@ Resources:
     Properties:
       DBName:
         Ref: DBName
-      Engine: MySQL
+      Engine: Aurora
       MultiAZ:
         Ref: MultiAZDatabase
       MasterUsername:

@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: >-
   WordPress is web software you can use to create a beautiful website or blog. This template
-  installs WordPress with a MySQL database in an S3 Bucket for storage.
+  installs WordPress with a MySQL database in AWS EFS for storage.
 Parameters:
   KeyName:
     Description: Name of an existing EC2 KeyPair to enable SSH access to the instances
@@ -320,274 +320,82 @@ Resources:
           FromPort: 22
           ToPort: 22
           CidrIp: !Ref SSHLocation
-  StorageSecurityGroup:
+  NfsSecurityGroup:
     Type: 'AWS::EC2::SecurityGroup'
     Properties:
       GroupDescription: >-
         Allow internal access from web server instance to storage resources
-      VpcId: !Ref privateNet
-  WebServer:
-    Type: 'AWS::EC2::Instance'
-    DependsOn: Storage
-    Metadata:
-      'AWS::CloudFormation::Init':
-        configSets:
-          wordpress_install:
-            - install_cfn
-            - install_wordpress
-            - configure_wordpress
-        install_cfn:
-          files:
-            /etc/cfn/cfn-hup.conf:
-              content: !Join
-                - ''
-                - - |
-                    [main]
-                  - stack=
-                  - !Ref 'AWS::StackId'
-                  - |+
-
-                  - region=
-                  - !Ref 'AWS::Region'
-                  - |+
-
-              mode: '000400'
-              owner: root
-              group: root
-            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
-              content: !Join
-                - ''
-                - - |
-                    [cfn-auto-reloader-hook]
-                  - |
-                    triggers=post.update
-                  - |
-                    path=Resources.WebServer.Metadata.AWS::CloudFormation::Init
-                  - 'action=/opt/aws/bin/cfn-init -v '
-                  - '         --stack '
-                  - !Ref 'AWS::StackName'
-                  - '         --resource WebServer '
-                  - '         --configsets wordpress_install '
-                  - '         --region '
-                  - !Ref 'AWS::Region'
-                  - |+
-
-              mode: '000400'
-              owner: root
-              group: root
-          services:
-            sysvinit:
-              cfn-hup:
-                enabled: 'true'
-                ensureRunning: 'true'
-                files:
-                  - /etc/cfn/cfn-hup.conf
-                  - /etc/cfn/hooks.d/cfn-auto-reloader.conf
-        install_wordpress:
-          packages:
-            yum:
-              php73: []
-              php73-mysqlnd: []
-              mysql57: []
-              mysql57-server: []
-              mysql57-devel: []
-              mysql57-libs: []
-              httpd24: []
-          sources:
-            /var/www/html: 'http://wordpress.org/latest.tar.gz'
-          files:
-            /tmp/setup.mysql:
-              content: !Join
-                - ''
-                - - 'CREATE DATABASE '
-                  - !Ref DBName
-                  - |
-                    ;
-                  - CREATE USER '
-                  - !Ref DBUser
-                  - '@'
-                  - !GetAtt Storage.DomainName
-                  - ''' IDENTIFIED BY '''
-                  - !Ref DBPassword
-                  - |
-                    ';
-                  - 'GRANT ALL ON '
-                  - !Ref DBName
-                  - .* TO '
-                  - !Ref DBUser
-                  - '@'
-                  - !GetAtt Storage.DomainName
-                  - |
-                    ';
-                  - |
-                    FLUSH PRIVILEGES;
-              mode: '000400'
-              owner: root
-              group: root
-            /tmp/create-wp-config:
-              content: !Join
-                - ''
-                - - |
-                    #!/bin/bash -xe
-                  - >
-                    cp /var/www/html/wordpress/wp-config-sample.php
-                    /var/www/html/wordpress/wp-config.php
-                  - sed -i "s/'database_name_here'/'
-                  - !Ref DBName
-                  - |
-                    '/g" wp-config.php
-                  - sed -i "s/'username_here'/'
-                  - !Ref DBUser
-                  - |
-                    '/g" wp-config.php
-                  - sed -i "s/'password_here'/'
-                  - !Ref DBPassword
-                  - |
-                    '/g" wp-config.php
-                  - sed -i "s/'localhost'/'
-                  - 'Fn::GetAtt':
-                      - Storage
-                      - WebsiteURL
-                  - |
-                    '/g" wp-config.php
-              mode: '000500'
-              owner: root
-              group: root
-          services:
-            sysvinit:
-              httpd:
-                enabled: 'true'
-                ensureRunning: 'true'
-              mysqld:
-                enabled: 'true'
-                ensureRunning: 'true'
-        configure_wordpress:
-          commands:
-            01_set_mysql_root_password:
-              command: !Join
-                - ''
-                - - mysqladmin -u root password '
-                  - !Ref DBRootPassword
-                  - ''''
-              test: !Join
-                - ''
-                - - '$(mysql '
-                  - !Ref DBName
-                  - ' -u root --password='''
-                  - !Ref DBRootPassword
-                  - ''' >/dev/null 2>&1 </dev/null); (( $? != 0 ))'
-            02_create_database:
-              command: !Join
-                - ''
-                - - mysql -u root --password='
-                  - !Ref DBRootPassword
-                  - ''' < /tmp/setup.mysql'
-              test: !Join
-                - ''
-                - - '$(mysql '
-                  - !Ref DBName
-                  - ' -u root --password='''
-                  - !Ref DBRootPassword
-                  - ''' >/dev/null 2>&1 </dev/null); (( $? != 0 ))'
-            03_configure_wordpress:
-              command: /tmp/create-wp-config
-              cwd: /var/www/html/wordpress
-    Properties:
-      ImageId: !FindInMap
-        - AWSRegionArch2AMI
-        - !Ref 'AWS::Region'
-        - !FindInMap
-          - AWSInstanceType2Arch
-          - !Ref InstanceType
-          - Arch
-      InstanceType: !Ref InstanceType
-      SubnetId: !Ref privateNetA
-      KeyName: !Ref KeyName
-      UserData: !Base64
-        'Fn::Join':
-          - ''
-          - - |
-              #!/bin/bash -xe
-            - |
-              yum update -y aws-cfn-bootstrap
-            - '/opt/aws/bin/cfn-init -v '
-            - '         --stack '
-            - !Ref 'AWS::StackName'
-            - '         --resource WebServer '
-            - '         --configsets wordpress_install '
-            - '         --region '
-            - !Ref 'AWS::Region'
-            - |+
-
-            - '/opt/aws/bin/cfn-signal -e $? '
-            - '         --stack '
-            - !Ref 'AWS::StackName'
-            - '         --resource WebServer '
-            - '         --region '
-            - !Ref 'AWS::Region'
-            - |+
-      Tags:
-        - Key: 'application'
-          Value: 'wordpress'
-        - Key: 'category'
-          Value: 'blog'
-        - Key: 'purpose'
-          Value: 'personal'
-
-    CreationPolicy:
-      ResourceSignal:
-        Timeout: PT15M
-  Storage:
-    Type: AWS::S3::Bucket
-  StorageAccessPoint:
-    Type: AWS::S3::AccessPoint
-    Properties:
-      Bucket: !Ref Storage
-      VpcConfiguration:
-        VpcId: !Ref privateNet
-  privateNet:
+      VpcId: !Ref PrivateNet
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          CidrIp: !GetAtt PrivateNet.CidrBlock
+  PrivateNet:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: "10.0.0.0/16"
       EnableDnsSupport: yes
       EnableDnsHostnames: yes
-  privateNetA:
+  PrivateNetA:
     Type: AWS::EC2::Subnet
     Properties:
       CidrBlock: '10.0.0.0/28'
-      VpcId: !Ref privateNet
-  S3Endpoint:
-    Type: 'AWS::EC2::VPCEndpoint'
+      VpcId: !Ref PrivateNet
+
+  Cluster:
+    Type: AWS::ECS::Cluster
     Properties:
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal: '*'
-            Action:
-              - 's3:GetObject'
-            Resource:
-              - !Ref Storage
-      RouteTableIds:
-        - !Ref routetableA
-        - !Ref routetableB
-      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
-      VpcId: !Ref privateNet
+      ClusterName: blogs
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      # CapacityProviders:
+      #   - FARGATE
+      #   - FARGATE_SPOT
+      # DefaultCapacityProviderStrategy:
+      #   - CapacityProvider: FARGATE
+      #     Weight: 1
+      #   - CapacityProvider: FARGATE_SPOT
+      #     Weight: 1
+      #     Base: 3
 
+  WordpressService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref Cluster
+      DeploymentController:
+        Type: ECS
+      DesiredCount: 2
+      EnableECSManagedTags: true
+      # LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets:
+            - !Ref PrivateNetA
+          AssignPublicIp: DISABLED
+      PropagateTags: SERVICE
+      TaskDefinition: !Ref TaskDef
 
-Outputs:
-  WebsiteURL:
-    Value: !Join
-      - ''
-      - - 'http://'
-        - !GetAtt
-          - WebServer
-          - PublicDnsName
-        - /wordpress
-    Description: WordPress Website
-  StoragePublicURL:
-    Description: 'Public address of internal storage volume'
-    Value: !GetAtt Storage.WebsiteURL
-  StorageURL:
-    Description: 'Private address of internal storage volume'
-    Value: !GetAtt Storage.DomainName
+  TaskDef:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        -
+          Name: WordPress
+          Cpu: 1024
+          Memory: 1
+          Image: "wordpress"
+          Environment:
+            - Name: WORDPRESS_DB_HOST
+              Value: "EFS" ############
+            - Name: WORDPRESS_DB_USER
+              Value: !Ref DBUser
+            - Name: WORDPRESS_DB_PASSWORD
+              Value: !Ref DBPassword
+            - Name: WORDPRESS_DB_NAME
+              Value: !Ref DBName
+          Essential: yes
+          PortMappings:
+            -
+              ContainerPort: 80
